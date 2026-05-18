@@ -105,8 +105,11 @@ def safe_filename(title: str) -> str:
         for char in title
     )
 
-    while filename.endswith((" ", ".")):
-        filename = filename[:-1] + quote(filename[-1], safe="")
+    while filename.endswith(" "):
+        filename = filename[:-1] + "%20"
+
+    while filename.endswith("."):
+        filename = filename[:-1] + "%2E"
 
     return filename + ".md"
 
