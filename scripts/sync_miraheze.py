@@ -61,6 +61,14 @@ NAMESPACES = [0]
 # API連続アクセスの待機時間
 SLEEP_SECONDS = 0.2
 
+# 一時的なAPIエラーの再試行回数
+MAX_RETRIES = 5
+RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
+
+# 差分判定用メタデータをまとめて取得する件数
+METADATA_BATCH_SIZE = 25
+PARTIAL_INDEX_SAVE_EVERY_BATCHES = 10
+
 # 除外したいタイトルの接頭辞
 # namespace 0 だけなら多くは不要ですが、念のため入れています。
 EXCLUDE_PREFIXES = [
@@ -216,24 +224,65 @@ def encoded_relative_url(path: str) -> str:
 
 # ===== MediaWiki API =====
 
-def api_get(params: dict) -> dict:
+def api_request(params: dict, method: str = "GET") -> dict:
     """
-    MediaWiki API GETリクエスト。
+    MediaWiki APIリクエスト。
     """
     params = dict(params)
     params["format"] = "json"
     params["formatversion"] = "2"
 
-    response = requests.get(
-        API_URL,
-        params=params,
-        headers={
-            "User-Agent": "wiki-ai-mirror/1.0 (GitHub Pages mirror for AI reading)"
-        },
-        timeout=30,
-    )
-    response.raise_for_status()
-    return response.json()
+    last_error = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            request_kwargs = {"params": params} if method == "GET" else {"data": params}
+            response = requests.request(
+                method,
+                API_URL,
+                headers={
+                    "User-Agent": "wiki-ai-mirror/1.0 (GitHub Pages mirror for AI reading)"
+                },
+                timeout=30,
+                **request_kwargs,
+            )
+
+            if response.status_code in RETRY_STATUS_CODES:
+                response.raise_for_status()
+
+            response.raise_for_status()
+            return response.json()
+
+        except requests.RequestException as exc:
+            last_error = exc
+            status_code = getattr(getattr(exc, "response", None), "status_code", None)
+            should_retry = status_code in RETRY_STATUS_CODES or status_code is None
+
+            if not should_retry or attempt == MAX_RETRIES:
+                raise
+
+            wait_seconds = min(60, SLEEP_SECONDS * (2 ** attempt))
+            print(
+                f"WARNING: API request failed "
+                f"(attempt {attempt}/{MAX_RETRIES}, status={status_code}): {exc}"
+            )
+            print(f"WARNING: retrying in {wait_seconds:.1f}s")
+            time.sleep(wait_seconds)
+
+    raise RuntimeError(f"API request failed: {last_error}")
+
+
+def api_get(params: dict) -> dict:
+    """
+    MediaWiki API GETリクエスト。
+    """
+    return api_request(params, method="GET")
+
+
+def api_post(params: dict) -> dict:
+    """
+    MediaWiki API POSTリクエスト。
+    """
+    return api_request(params, method="POST")
 
 
 def get_all_page_titles(namespace: int) -> list[str]:
@@ -316,6 +365,43 @@ def get_page_data(title: str) -> dict | None:
         "categories": categories,
         "wikitext": wikitext,
     }
+
+
+def get_pages_metadata(titles: list[str]) -> dict[str, dict]:
+    """
+    差分判定用に、複数ページの更新日時など軽いメタデータだけ取得する。
+    """
+    params = {
+        "action": "query",
+        "prop": "revisions|info",
+        "titles": "|".join(titles),
+        "rvprop": "timestamp",
+        "inprop": "url",
+    }
+
+    data = api_post(params)
+    pages = data.get("query", {}).get("pages", [])
+    metadata: dict[str, dict] = {}
+
+    for page in pages:
+        if page.get("missing"):
+            continue
+
+        revisions = page.get("revisions", [])
+        if not revisions:
+            continue
+
+        title = page["title"]
+        metadata[title] = {
+            "title": title,
+            "namespace": page.get("ns"),
+            "pageid": page.get("pageid"),
+            "source_url": source_page_url(title),
+            "encoded_source_url": page.get("fullurl") or encoded_source_page_url(title),
+            "last_modified": revisions[0].get("timestamp"),
+        }
+
+    return metadata
 
 
 def parse_wikitext_to_plain_text(title: str) -> str:
@@ -441,6 +527,16 @@ def write_index_json(index: list[dict]) -> None:
     )
 
 
+def write_partial_index_json(index: list[dict]) -> None:
+    """
+    途中失敗しても次回差分同期できるよう、処理済みindexを保存する。
+    """
+    if not index:
+        return
+
+    write_index_json(sorted(index, key=lambda item: item["title"]))
+
+
 def write_robots() -> None:
     """
     ChatGPTから読ませることを意識したrobots.txt。
@@ -508,6 +604,72 @@ def collect_titles() -> list[str]:
     return sorted(set(all_titles))
 
 
+def chunked(items: list[str], size: int) -> list[list[str]]:
+    """
+    リストを指定件数ごとの塊に分ける。
+    """
+    return [items[i:i + size] for i in range(0, len(items), size)]
+
+
+def load_existing_index() -> dict[str, dict]:
+    """
+    前回生成済みのindex.jsonを読み、差分同期に使う。
+    """
+    index_path = OUTPUT_DIR / "index.json"
+    if not index_path.exists() or index_path.stat().st_size == 0:
+        return {}
+
+    try:
+        items = json.loads(index_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        print(f"WARNING: existing index.json is invalid; full sync required: {exc}")
+        return {}
+
+    return {
+        item["title"]: item
+        for item in items
+        if isinstance(item, dict) and item.get("title")
+    }
+
+
+def make_index_item(page: dict) -> dict:
+    """
+    ページ情報からindex.json用メタデータを作る。
+    """
+    title = page["title"]
+    filename = safe_filename(title)
+    mirror_path = f"pages/{filename}"
+
+    return {
+        "title": title,
+        "namespace": page.get("namespace"),
+        "source_url": page["source_url"],
+        "encoded_source_url": page["encoded_source_url"],
+        "mirror_url": mirror_path,
+        "public_url": public_url(mirror_path),
+        "encoded_public_url": encoded_public_url(mirror_path),
+        "last_modified": page.get("last_modified"),
+        "categories": page.get("categories", []),
+    }
+
+
+def cached_page_is_current(metadata: dict, existing_item: dict | None) -> bool:
+    """
+    前回生成済みMarkdownが更新不要ならTrue。
+    """
+    if not existing_item:
+        return False
+
+    if existing_item.get("last_modified") != metadata.get("last_modified"):
+        return False
+
+    expected_path = OUTPUT_DIR / make_index_item({
+        **metadata,
+        "categories": existing_item.get("categories", []),
+    })["mirror_url"]
+    return expected_path.exists()
+
+
 def cleanup_stale_pages(titles: list[str]) -> None:
     """
     今回の同期対象に存在しない古いMarkdownを削除する。
@@ -531,42 +693,64 @@ def sync_pages(titles: list[str]) -> list[dict]:
     """
     index: list[dict] = []
     failures: list[str] = []
+    existing_index = load_existing_index()
+    skipped_count = 0
+    updated_count = 0
+    metadata_batches = chunked(titles, METADATA_BATCH_SIZE)
 
-    for i, title in enumerate(titles, start=1):
-        print(f"[{i}/{len(titles)}] {title}")
+    for batch_number, batch_titles in enumerate(metadata_batches, start=1):
+        print(f"metadata batch {batch_number}/{len(metadata_batches)}")
+        metadata_by_title = get_pages_metadata(batch_titles)
 
-        try:
-            page = get_page_data(title)
-            if not page:
-                failures.append(f"{title}: no page data")
-                print(f"ERROR: no page data: {title}")
+        for title in batch_titles:
+            metadata = metadata_by_title.get(title)
+            if not metadata:
+                failures.append(f"{title}: no metadata")
+                print(f"ERROR: no metadata: {title}")
                 continue
 
-            plain_text = parse_wikitext_to_plain_text(title)
+            existing_item = existing_index.get(title)
+            if cached_page_is_current(metadata, existing_item):
+                index.append(make_index_item({
+                    **metadata,
+                    "categories": existing_item.get("categories", []),
+                }))
+                skipped_count += 1
+                if skipped_count % 500 == 0:
+                    print(f"cached pages skipped: {skipped_count}")
+                continue
 
-            filename = safe_filename(title)
-            mirror_path = f"pages/{filename}"
+            print(f"[{updated_count + skipped_count + 1}/{len(titles)}] update {title}")
 
-            markdown = make_markdown(page, plain_text)
-            (PAGES_DIR / filename).write_text(markdown, encoding="utf-8")
+            try:
+                page = get_page_data(title)
+                if not page:
+                    failures.append(f"{title}: no page data")
+                    print(f"ERROR: no page data: {title}")
+                    continue
 
-            index.append({
-                "title": page["title"],
-                "namespace": page.get("namespace"),
-                "source_url": page["source_url"],
-                "encoded_source_url": page["encoded_source_url"],
-                "mirror_url": mirror_path,
-                "public_url": public_url(mirror_path),
-                "encoded_public_url": encoded_public_url(mirror_path),
-                "last_modified": page.get("last_modified"),
-                "categories": page.get("categories", []),
-            })
+                plain_text = parse_wikitext_to_plain_text(title)
 
-            time.sleep(SLEEP_SECONDS)
+                filename = safe_filename(title)
+                markdown = make_markdown(page, plain_text)
+                (PAGES_DIR / filename).write_text(markdown, encoding="utf-8")
 
-        except Exception as exc:
-            failures.append(f"{title}: {exc}")
-            print(f"ERROR: {title}: {exc}")
+                index.append(make_index_item(page))
+                updated_count += 1
+
+                time.sleep(SLEEP_SECONDS)
+
+            except Exception as exc:
+                failures.append(f"{title}: {exc}")
+                print(f"ERROR: {title}: {exc}")
+
+        time.sleep(SLEEP_SECONDS)
+        if batch_number % PARTIAL_INDEX_SAVE_EVERY_BATCHES == 0:
+            write_partial_index_json(index)
+            print(f"partial index saved: {len(index)} pages")
+
+    print(f"sync pages: {updated_count} updated, {skipped_count} cached")
+    write_partial_index_json(index)
 
     if failures:
         print("Sync failed for the following pages:")

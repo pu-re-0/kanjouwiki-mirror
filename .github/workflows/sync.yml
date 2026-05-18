@@ -35,9 +35,24 @@ jobs:
         run: |
           pip install -r requirements.txt
 
+      - name: Restore mirror cache
+        uses: actions/cache/restore@v4
+        with:
+          path: public
+          key: mirror-${{ github.run_id }}
+          restore-keys: |
+            mirror-
+
       - name: Sync Miraheze
         run: |
           python -u scripts/sync_miraheze.py
+
+      - name: Save mirror cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: public
+          key: mirror-${{ github.run_id }}
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
