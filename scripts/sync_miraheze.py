@@ -478,12 +478,17 @@ def cleanup_stale_pages(titles: list[str]) -> None:
     """
     今回の同期対象に存在しない古いMarkdownを削除する。
     """
+    print("cleanup stale pages: start")
     expected_files = {safe_filename(title) for title in titles}
+    deleted_count = 0
 
     for path in PAGES_DIR.glob("*.md"):
         if path.name not in expected_files:
             print(f"DELETE stale page: {path}")
             path.unlink()
+            deleted_count += 1
+
+    print(f"cleanup stale pages: done ({deleted_count} deleted)")
 
 
 def sync_pages(titles: list[str]) -> list[dict]:
@@ -549,6 +554,7 @@ def main() -> None:
         raise RuntimeError("no pages found; refusing to publish an empty mirror")
 
     cleanup_stale_pages(titles)
+    print("sync pages: start")
     index = sync_pages(titles)
 
     write_index_json(index)
