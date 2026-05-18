@@ -2,6 +2,7 @@ import json
 import re
 import time
 import html
+import hashlib
 from pathlib import Path
 from urllib.parse import quote
 
@@ -85,6 +86,7 @@ EXCLUDE_YEAR_ONLY_PAGES = True
 
 FILESYSTEM_UNSAFE_CHARS = set('%<>:"/\\|?*')
 URL_PATH_UNSAFE_CHARS = set("%#?/")
+MAX_FILENAME_BYTES = 240
 
 
 # ===== ユーティリティ =====
@@ -112,7 +114,32 @@ def safe_filename(title: str) -> str:
     while filename.endswith("."):
         filename = filename[:-1] + "%2E"
 
-    return filename + ".md"
+    return shorten_filename(filename, title)
+
+
+def shorten_filename(filename: str, title: str) -> str:
+    """
+    ファイルシステムの1ファイル名長制限に収まるよう、長いタイトルだけ短縮する。
+    """
+    extension = ".md"
+    full_filename = filename + extension
+    if len(full_filename.encode("utf-8")) <= MAX_FILENAME_BYTES:
+        return full_filename
+
+    digest = hashlib.sha1(title.encode("utf-8")).hexdigest()[:12]
+    suffix = f"--{digest}{extension}"
+    max_prefix_bytes = MAX_FILENAME_BYTES - len(suffix.encode("utf-8"))
+
+    prefix = ""
+    used_bytes = 0
+    for char in filename:
+        char_bytes = len(char.encode("utf-8"))
+        if used_bytes + char_bytes > max_prefix_bytes:
+            break
+        prefix += char
+        used_bytes += char_bytes
+
+    return prefix.rstrip(" .") + suffix
 
 
 def source_page_url(title: str) -> str:
