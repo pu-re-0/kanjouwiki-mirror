@@ -70,8 +70,9 @@ EXCLUDE_PREFIXES = [
     "Talk:",
     "トーク:",
     "MediaWiki:",
+    "Broken/",
+    "Broken:",
 ]
-
 # 除外したいタイトル内文字列
 EXCLUDE_TITLE_CONTAINS = [
     # "下書き",
