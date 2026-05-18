@@ -80,7 +80,7 @@ EXCLUDE_TITLE_CONTAINS = [
 ]
 
 # 「2000」「2000年」「1484年代」のような年号ページを除外するか
-EXCLUDE_YEAR_ONLY_PAGES = False
+EXCLUDE_YEAR_ONLY_PAGES = Ture
 
 FILESYSTEM_UNSAFE_CHARS = set('%<>:"/\\|?*')
 URL_PATH_UNSAFE_CHARS = set("%#?/")
