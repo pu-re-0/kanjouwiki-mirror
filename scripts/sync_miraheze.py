@@ -159,6 +159,9 @@ def should_exclude_title(title: str) -> bool:
         if re.fullmatch(r"\d{1,4}年代?", normalized_title):
             return True
 
+        if re.fullmatch(r"\d{1,2}月\d{1,2}日?", normalized_title):
+            return True
+
     return False
 
 
