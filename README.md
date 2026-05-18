@@ -1,2 +1,2 @@
 # kanjouwiki-mirror
-https://kanjou.miraheze.orgのAIbot用ミラー
+https://kanjou.miraheze.org のAIbot用ミラー
