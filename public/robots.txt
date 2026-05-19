@@ -8,6 +8,6 @@ User-agent: GPTBot
 Disallow: /
 
 User-agent: *
-Disallow: /
+Allow: /
 
 Sitemap: https://pu-re-0.github.io/kanjouwiki-mirror/sitemap.xml

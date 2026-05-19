@@ -585,7 +585,7 @@ def write_partial_index_json(index: list[dict]) -> None:
 def write_robots() -> None:
     """
     ChatGPTから読ませることを意識したrobots.txt。
-    AI関連クローラーを許可し、通常検索エンジンの重複インデックスを避ける。
+    通常取得を許可し、インデックス抑制はHTML側のnoindexに任せる。
     """
     robots = f"""User-agent: OAI-SearchBot
 Allow: /
@@ -597,7 +597,7 @@ User-agent: GPTBot
 Disallow: /
 
 User-agent: *
-Disallow: /
+Allow: /
 
 Sitemap: {public_url("sitemap.xml")}
 """
@@ -683,7 +683,7 @@ def make_index_item(page: dict) -> dict:
     """
     title = page["title"]
     filename = safe_filename(title)
-    mirror_path = f"pages/{filename}"
+    markdown_path = f"pages/{filename}"
     html_filename = safe_html_filename(title)
     html_path = f"pages/{html_filename}"
 
@@ -692,12 +692,15 @@ def make_index_item(page: dict) -> dict:
         "namespace": page.get("namespace"),
         "source_url": page["source_url"],
         "encoded_source_url": page["encoded_source_url"],
-        "mirror_url": mirror_path,
-        "public_url": public_url(mirror_path),
-        "encoded_public_url": encoded_public_url(mirror_path),
+        "mirror_url": html_path,
+        "public_url": public_url(html_path),
+        "encoded_public_url": encoded_public_url(html_path),
         "html_url": html_path,
         "public_html_url": public_url(html_path),
         "encoded_public_html_url": encoded_public_url(html_path),
+        "markdown_url": markdown_path,
+        "public_markdown_url": public_url(markdown_path),
+        "encoded_public_markdown_url": encoded_public_url(markdown_path),
         "last_modified": page.get("last_modified"),
         "categories": page.get("categories", []),
     }
@@ -717,7 +720,7 @@ def cached_page_is_current(metadata: dict, existing_item: dict | None) -> bool:
         **metadata,
         "categories": existing_item.get("categories", []),
     })
-    expected_markdown_path = OUTPUT_DIR / expected_item["mirror_url"]
+    expected_markdown_path = OUTPUT_DIR / expected_item["markdown_url"]
     expected_html_path = OUTPUT_DIR / expected_item["html_url"]
     return expected_markdown_path.exists() and expected_html_path.exists()
 
