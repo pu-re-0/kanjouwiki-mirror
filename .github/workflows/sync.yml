@@ -47,6 +47,12 @@ jobs:
         run: |
           python -u scripts/sync_miraheze.py
 
+      - name: Show generated files
+        run: |
+          find public -type f | wc -l
+          du -sh public
+          ls -lh public/index.html public/index.json public/sitemap.xml public/robots.txt
+
       - name: Save mirror cache
         if: always()
         uses: actions/cache/save@v4

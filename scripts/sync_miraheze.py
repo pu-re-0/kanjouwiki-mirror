@@ -42,9 +42,9 @@ API_URL = "https://kanjou.miraheze.org/w/api.php"
 # 例: https://example.miraheze.org/wiki/
 WIKI_BASE_URL = "https://kanjou.miraheze.org/wiki/"
 
-# 例: https://YOUR_GITHUB_USERNAME.github.io/wiki-ai-mirror/
+# 例: https://YOUR_GITHUB_USERNAME.github.io/kanjouwiki-mirror/
 # 末尾の / を付けてください
-PUBLIC_BASE_URL = "https://pu-re-0.github.io/wiki-ai-mirror/"
+PUBLIC_BASE_URL = "https://pu-re-0.github.io/kanjouwiki-mirror/"
 
 # 出力先
 OUTPUT_DIR = Path("public")
