@@ -125,6 +125,14 @@ def safe_filename(title: str) -> str:
     return shorten_filename(filename, title)
 
 
+def safe_html_filename(title: str) -> str:
+    """
+    Markdownと同じベース名でHTMLファイル名を作る。
+    """
+    markdown_filename = safe_filename(title)
+    return markdown_filename[:-3] + ".html"
+
+
 def shorten_filename(filename: str, title: str) -> str:
     """
     ファイルシステムの1ファイル名長制限に収まるよう、長いタイトルだけ短縮する。
@@ -475,6 +483,42 @@ Categories: {categories}
     return header + body.strip() + footer
 
 
+def make_page_html(page: dict, plain_text: str, markdown_url: str) -> str:
+    """
+    通常のブラウザ/AIブラウザが辿りやすい記事HTMLを作る。
+    """
+    title = html.escape(page["title"])
+    source_url = html.escape(page["encoded_source_url"], quote=True)
+    markdown_href = html.escape(encoded_relative_url(markdown_url), quote=True)
+    last_modified = html.escape(page.get("last_modified") or "unknown")
+    categories = html.escape(", ".join(page.get("categories", [])) or "なし")
+    body = html.escape(plain_text or page.get("wikitext", ""))
+
+    return f"""<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>{title}</title>
+  <meta name="robots" content="noindex, follow">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+  <article>
+    <h1>{title}</h1>
+    <p>
+      Source: <a href="{source_url}">original wiki page</a><br>
+      Markdown: <a href="{markdown_href}">markdown source</a><br>
+      Last modified: {last_modified}<br>
+      Categories: {categories}
+    </p>
+    <hr>
+    <pre>{body}</pre>
+  </article>
+</body>
+</html>
+"""
+
+
 def write_index_html(index: list[dict]) -> None:
     """
     人間とAIの両方が辿りやすいトップページを出力する。
@@ -483,7 +527,7 @@ def write_index_html(index: list[dict]) -> None:
 
     for item in index:
         title = html.escape(item["title"])
-        href = html.escape(encoded_relative_url(item["mirror_url"]), quote=True)
+        href = html.escape(encoded_relative_url(item.get("html_url") or item["mirror_url"]), quote=True)
         source = html.escape(item.get("encoded_source_url") or item["source_url"], quote=True)
         modified = html.escape(item.get("last_modified") or "")
 
@@ -571,7 +615,7 @@ def write_sitemap(index: list[dict]) -> None:
     ]
 
     for item in index:
-        urls.append(encoded_public_url(item["mirror_url"]))
+        urls.append(encoded_public_url(item.get("html_url") or item["mirror_url"]))
 
     xml_items = []
     for url in urls:
@@ -640,6 +684,8 @@ def make_index_item(page: dict) -> dict:
     title = page["title"]
     filename = safe_filename(title)
     mirror_path = f"pages/{filename}"
+    html_filename = safe_html_filename(title)
+    html_path = f"pages/{html_filename}"
 
     return {
         "title": title,
@@ -649,6 +695,9 @@ def make_index_item(page: dict) -> dict:
         "mirror_url": mirror_path,
         "public_url": public_url(mirror_path),
         "encoded_public_url": encoded_public_url(mirror_path),
+        "html_url": html_path,
+        "public_html_url": public_url(html_path),
+        "encoded_public_html_url": encoded_public_url(html_path),
         "last_modified": page.get("last_modified"),
         "categories": page.get("categories", []),
     }
@@ -664,11 +713,13 @@ def cached_page_is_current(metadata: dict, existing_item: dict | None) -> bool:
     if existing_item.get("last_modified") != metadata.get("last_modified"):
         return False
 
-    expected_path = OUTPUT_DIR / make_index_item({
+    expected_item = make_index_item({
         **metadata,
         "categories": existing_item.get("categories", []),
-    })["mirror_url"]
-    return expected_path.exists()
+    })
+    expected_markdown_path = OUTPUT_DIR / expected_item["mirror_url"]
+    expected_html_path = OUTPUT_DIR / expected_item["html_url"]
+    return expected_markdown_path.exists() and expected_html_path.exists()
 
 
 def cleanup_stale_pages(titles: list[str]) -> None:
@@ -677,9 +728,12 @@ def cleanup_stale_pages(titles: list[str]) -> None:
     """
     print("cleanup stale pages: start")
     expected_files = {safe_filename(title) for title in titles}
+    expected_files.update(safe_html_filename(title) for title in titles)
     deleted_count = 0
 
-    for path in PAGES_DIR.glob("*.md"):
+    for path in PAGES_DIR.glob("*"):
+        if not path.is_file():
+            continue
         if path.name not in expected_files:
             print(f"DELETE stale page: {path}")
             path.unlink()
@@ -733,8 +787,14 @@ def sync_pages(titles: list[str]) -> list[dict]:
                 plain_text = parse_wikitext_to_plain_text(title)
 
                 filename = safe_filename(title)
+                html_filename = safe_html_filename(title)
+                mirror_path = f"pages/{filename}"
                 markdown = make_markdown(page, plain_text)
                 (PAGES_DIR / filename).write_text(markdown, encoding="utf-8")
+                (PAGES_DIR / html_filename).write_text(
+                    make_page_html(page, plain_text, mirror_path),
+                    encoding="utf-8",
+                )
 
                 index.append(make_index_item(page))
                 updated_count += 1
