@@ -133,6 +133,20 @@ def safe_html_filename(title: str) -> str:
     return markdown_filename[:-3] + ".html"
 
 
+def page_markdown_path(title: str) -> str:
+    """
+    記事Markdownのpublic相対パスを作る。
+    """
+    return f"pages/{safe_filename(title)}"
+
+
+def page_html_path(title: str) -> str:
+    """
+    記事HTMLのpublic相対パスを作る。
+    """
+    return f"pages/{safe_html_filename(title)}"
+
+
 def shorten_filename(filename: str, title: str) -> str:
     """
     ファイルシステムの1ファイル名長制限に収まるよう、長いタイトルだけ短縮する。
@@ -527,8 +541,8 @@ def write_index_html(index: list[dict]) -> None:
 
     for item in index:
         title = html.escape(item["title"])
-        href = html.escape(encoded_relative_url(item.get("html_url") or item["mirror_url"]), quote=True)
-        source = html.escape(item.get("encoded_source_url") or item["source_url"], quote=True)
+        href = html.escape(encoded_relative_url(page_html_path(item["title"])), quote=True)
+        source = html.escape(encoded_source_page_url(item["title"]), quote=True)
         modified = html.escape(item.get("last_modified") or "")
 
         rows.append(
@@ -615,7 +629,7 @@ def write_sitemap(index: list[dict]) -> None:
     ]
 
     for item in index:
-        urls.append(encoded_public_url(item.get("html_url") or item["mirror_url"]))
+        urls.append(encoded_public_url(page_html_path(item["title"])))
 
     xml_items = []
     for url in urls:
@@ -682,8 +696,6 @@ def make_index_item(page: dict) -> dict:
     ページ情報からindex.json用メタデータを作る。
     """
     title = page["title"]
-    filename = safe_filename(title)
-    markdown_path = f"pages/{filename}"
     html_filename = safe_html_filename(title)
     html_path = f"pages/{html_filename}"
 
@@ -691,16 +703,8 @@ def make_index_item(page: dict) -> dict:
         "title": title,
         "namespace": page.get("namespace"),
         "source_url": page["source_url"],
-        "encoded_source_url": page["encoded_source_url"],
-        "mirror_url": html_path,
         "public_url": public_url(html_path),
         "encoded_public_url": encoded_public_url(html_path),
-        "html_url": html_path,
-        "public_html_url": public_url(html_path),
-        "encoded_public_html_url": encoded_public_url(html_path),
-        "markdown_url": markdown_path,
-        "public_markdown_url": public_url(markdown_path),
-        "encoded_public_markdown_url": encoded_public_url(markdown_path),
         "last_modified": page.get("last_modified"),
         "categories": page.get("categories", []),
     }
@@ -716,12 +720,8 @@ def cached_page_is_current(metadata: dict, existing_item: dict | None) -> bool:
     if existing_item.get("last_modified") != metadata.get("last_modified"):
         return False
 
-    expected_item = make_index_item({
-        **metadata,
-        "categories": existing_item.get("categories", []),
-    })
-    expected_markdown_path = OUTPUT_DIR / expected_item["markdown_url"]
-    expected_html_path = OUTPUT_DIR / expected_item["html_url"]
+    expected_markdown_path = OUTPUT_DIR / page_markdown_path(metadata["title"])
+    expected_html_path = OUTPUT_DIR / page_html_path(metadata["title"])
     return expected_markdown_path.exists() and expected_html_path.exists()
 
 
