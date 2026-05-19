@@ -5,9 +5,9 @@ User-agent: ChatGPT-User
 Allow: /
 
 User-agent: GPTBot
-Allow: /
+Disallow: /
 
 User-agent: *
-Allow: /
+Disallow: /
 
-Sitemap: https://pu-re-0.github.io/wiki-ai-mirror/sitemap.xml
+Sitemap: https://pu-re-0.github.io/kanjouwiki-mirror/sitemap.xml

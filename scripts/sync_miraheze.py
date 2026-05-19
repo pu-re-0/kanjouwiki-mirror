@@ -498,6 +498,7 @@ def write_index_html(index: list[dict]) -> None:
 <head>
   <meta charset="utf-8">
   <title>Wiki AI Mirror</title>
+  <meta name="robots" content="noindex, follow">
   <meta name="viewport" content="width=device-width, initial-scale=1">
 </head>
 <body>
@@ -540,7 +541,7 @@ def write_partial_index_json(index: list[dict]) -> None:
 def write_robots() -> None:
     """
     ChatGPTから読ませることを意識したrobots.txt。
-    AI関連クローラーと通常クローラーを許可する。
+    AI関連クローラーを許可し、通常検索エンジンの重複インデックスを避ける。
     """
     robots = f"""User-agent: OAI-SearchBot
 Allow: /
@@ -549,10 +550,10 @@ User-agent: ChatGPT-User
 Allow: /
 
 User-agent: GPTBot
-Allow: /
+Disallow: /
 
 User-agent: *
-Allow: /
+Disallow: /
 
 Sitemap: {public_url("sitemap.xml")}
 """
